@@ -1,0 +1,10 @@
+{
+  "name": "ai-operations-document-intelligence-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "dev": "npm --prefix frontend run dev",
+    "typecheck": "npm --prefix frontend run typecheck"
+  }
+}
