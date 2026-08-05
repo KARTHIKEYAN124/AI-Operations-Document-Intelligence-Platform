@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
 import { analyzePlainText, type AnalyzeResponse } from "@/lib/document-analysis";
 
 export const runtime = "nodejs";
@@ -66,15 +65,20 @@ async function extractText(file: File, buffer: Buffer) {
   }
 
   if (type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-    const parser = new PDFParse({ data: buffer });
     try {
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: buffer });
       const result = await parser.getText();
+      await parser.destroy();
       return {
         text: result.text,
         limitations: result.text.trim() ? [] : ["No selectable text was found. Scanned PDFs need OCR."]
       };
-    } finally {
-      await parser.destroy();
+    } catch {
+      return {
+        text: "",
+        limitations: ["PDF text extraction is unavailable in this serverless runtime. TXT, Markdown, and DOCX analysis are fully supported."]
+      };
     }
   }
 
