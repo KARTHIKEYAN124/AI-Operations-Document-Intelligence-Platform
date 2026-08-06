@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -40,6 +40,7 @@ const emptyTrend = [
   { label: "Signals", value: 0 },
   { label: "Chunks", value: 0 }
 ];
+const STORAGE_KEY = "aiops-analyzed-documents";
 
 export function Dashboard() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +51,27 @@ export function Dashboard() {
   const [answer, setAnswer] = useState<ReturnType<typeof answerQuestion>>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    try {
+      const documents = JSON.parse(saved) as AnalyzedDocument[];
+      setQueue(
+        documents.map((document) => ({
+          id: document.id,
+          filename: document.filename,
+          sizeBytes: document.sizeBytes,
+          status: document.status,
+          progress: 100,
+          document
+        }))
+      );
+      setSelectedId(documents[0]?.id ?? null);
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  }, []);
+
   const documents = useMemo(() => queue.flatMap((item) => (item.document ? [item.document] : [])), [queue]);
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedId) ?? documents[0],
@@ -58,6 +80,10 @@ export function Dashboard() {
   const searchResults = useMemo(() => searchDocuments(documents, searchQuery), [documents, searchQuery]);
   const readyCount = queue.filter((item) => item.status === "Analysis ready").length;
   const processingCount = queue.filter((item) => item.status === "Uploading" || item.status === "Processing").length;
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(documents));
+  }, [documents]);
 
   async function analyzeFiles(files: FileList | File[]) {
     const incoming = Array.from(files);

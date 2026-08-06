@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, Bell, Database, FileText, Home, Lock, Search, Settings, ShieldCheck, UploadCloud, Users } from "lucide-react";
+import { BarChart3, Database, FileText, Home, Search, Settings, ShieldCheck, UploadCloud, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { navItems } from "@/lib/sample-data";
@@ -40,14 +40,10 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
           </div>
         </div>
         <div className="ml-auto hidden items-center gap-8 text-sm md:flex">
-          <StatusItem icon={<ShieldCheck size={20} />} label="Analyzer" value="Ready" tone="text-emerald-600" />
-          <StatusItem icon={<Database size={20} />} label="Storage" value="Session" tone="text-teal" />
-          <StatusItem icon={<FileText size={20} />} label="Uploads" value="Live" tone="text-ink" />
-          <button className="focus-ring relative rounded p-2 text-ink" aria-label="Notifications">
-            <Bell size={22} />
-            <span className="absolute right-1 top-0 grid size-5 place-items-center rounded-full bg-teal text-xs font-bold text-white">1</span>
-          </button>
-          <div className="grid size-11 place-items-center rounded-full bg-teal font-bold text-white">AD</div>
+          <StatusItem icon={<ShieldCheck size={20} />} label="Analyzer" value="Online" tone="text-emerald-600" />
+          <StatusItem icon={<Database size={20} />} label="Storage" value="Browser session" tone="text-teal" />
+          <StatusItem icon={<FileText size={20} />} label="Uploads" value="Enabled" tone="text-ink" />
+          <div className="grid size-11 place-items-center rounded-full bg-teal text-sm font-bold text-white" title="Admin User">Admin</div>
         </div>
       </header>
       <aside className="fixed bottom-0 left-0 top-20 z-10 hidden w-64 flex-col bg-[#061a2b] px-4 py-5 text-white md:flex">

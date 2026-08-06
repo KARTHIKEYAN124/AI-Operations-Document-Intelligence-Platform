@@ -1,5 +1,10 @@
-import { PageScaffold } from "@/components/page-scaffold";
+import { AppShell } from "@/components/app-shell";
+import { Dashboard } from "@/components/dashboard";
 
 export default function AnalysisPage() {
-  return <PageScaffold page="analysis" />;
+  return (
+    <AppShell>
+      <Dashboard />
+    </AppShell>
+  );
 }

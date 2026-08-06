@@ -1,5 +1,10 @@
-import { PageScaffold } from "@/components/page-scaffold";
+import { AppShell } from "@/components/app-shell";
+import { Dashboard } from "@/components/dashboard";
 
 export default function QaPage() {
-  return <PageScaffold page="qa" />;
+  return (
+    <AppShell>
+      <Dashboard />
+    </AppShell>
+  );
 }

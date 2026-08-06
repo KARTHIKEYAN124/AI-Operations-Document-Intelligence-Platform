@@ -1,5 +1,10 @@
-import { PageScaffold } from "@/components/page-scaffold";
+import { AppShell } from "@/components/app-shell";
+import { Dashboard } from "@/components/dashboard";
 
 export default function UploadPage() {
-  return <PageScaffold page="upload" />;
+  return (
+    <AppShell>
+      <Dashboard />
+    </AppShell>
+  );
 }
