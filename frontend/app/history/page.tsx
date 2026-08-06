@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/app-shell";
-import { Dashboard } from "@/components/dashboard";
+import { WorkspacePage } from "@/components/document-workspace";
 
 export default function HistoryPage() {
   return (
     <AppShell>
-      <Dashboard />
+      <WorkspacePage mode="history" />
     </AppShell>
   );
 }
