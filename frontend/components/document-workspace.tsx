@@ -127,7 +127,7 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
             onSelect={setSelectedId}
           />
         ) : null}
-        {mode === "analysis" ? <AnalysisView documents={documents} selectedDocument={selectedDocument} onSelect={setSelectedId} /> : null}
+        {mode === "analysis" ? <AnalysisView documents={documents} selectedDocument={selectedDocument} onSelect={setSelectedId} onRemove={removeDocument} /> : null}
         {mode === "search" ? <SearchView query={query} setQuery={setQuery} results={searchResults} documents={documents} /> : null}
         {mode === "qa" ? (
           <QaView
@@ -174,17 +174,20 @@ function PageHeader({
   queue
 }: Readonly<{ title: string; description: string; documents: AnalyzedDocument[]; queue: UploadItem[] }>) {
   const processing = queue.filter((item) => item.status === "Uploading" || item.status === "Processing" || item.status === "Running OCR").length;
+  const stalePdfs = documents.filter((document) => document.mimeType === "application/pdf" && document.wordCount === 0).length;
   return (
-    <section className="border-b border-line bg-white px-5 py-4">
+    <section className="border-b border-line bg-white px-5 py-5">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold">{title}</h1>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal">Document Intelligence</p>
+          <h1 className="mt-1 text-2xl font-bold">{title}</h1>
           <p className="mt-1 text-sm text-muted">{description}</p>
         </div>
         <div className="ml-auto flex flex-wrap gap-2 text-xs">
           <Badge tone="blue">{documents.length} documents</Badge>
           <Badge tone="green">{documents.filter((document) => document.status === "Analysis ready").length} ready</Badge>
           <Badge tone={processing ? "amber" : "neutral"}>{processing} processing</Badge>
+          <Badge tone={stalePdfs ? "amber" : "neutral"}>{stalePdfs} stale PDFs</Badge>
         </div>
       </div>
     </section>
@@ -221,8 +224,8 @@ function UploadView({
       <Card className="p-5">
         <label
           className={cn(
-            "grid min-h-[320px] cursor-pointer place-items-center rounded-lg border border-dashed p-6 text-center transition",
-            isDragging ? "border-teal bg-teal/10" : "border-teal/60 bg-white hover:bg-teal/5"
+            "grid min-h-[320px] cursor-pointer place-items-center rounded-md border border-dashed p-6 text-center transition",
+            isDragging ? "border-teal bg-teal/10" : "border-teal/60 bg-[#fbfcfd] hover:bg-teal/5"
           )}
           onDrop={onDrop}
           onDragOver={onDragOver}
@@ -243,8 +246,16 @@ function UploadView({
         <CardHeader title="Upload queue and recent documents" />
         <div className="divide-y divide-line">
           {[...queue, ...documents.filter((document) => !queue.some((item) => item.document?.id === document.id)).map(documentToQueueItem)].map((item) => (
-            <button key={item.id} className="grid w-full grid-cols-[28px_1fr_160px] items-center gap-3 px-5 py-4 text-left hover:bg-slate-50" onClick={() => item.document && onSelect(item.document.id)}>
-              {item.status === "Failed" ? <AlertTriangle className="text-red-500" size={22} /> : item.status === "Analysis ready" ? <CheckCircle2 className="text-emerald-600" size={22} /> : <Loader2 className="animate-spin text-teal" size={22} />}
+            <button key={item.id} className="grid w-full grid-cols-[28px_1fr_160px] items-center gap-3 px-5 py-4 text-left hover:bg-[#f8fafc]" onClick={() => item.document && onSelect(item.document.id)}>
+              {item.status === "Failed" ? (
+                <AlertTriangle className="text-red-500" size={22} />
+              ) : item.status === "Analysis ready" ? (
+                <CheckCircle2 className="text-emerald-600" size={22} />
+              ) : item.status === "Needs review" ? (
+                <AlertTriangle className="text-amber" size={22} />
+              ) : (
+                <Loader2 className="animate-spin text-teal" size={22} />
+              )}
               <div className="min-w-0">
                 <p className={cn("truncate text-sm font-semibold", selectedId === item.document?.id && "text-teal")}>{item.filename}</p>
                 <p className="mt-1 text-xs text-muted">{formatBytes(item.sizeBytes)}</p>
@@ -256,7 +267,7 @@ function UploadView({
                   <span>{item.progress}%</span>
                 </div>
                 <div className="mt-2">
-                  <ProgressBar value={item.progress} tone={item.status === "Analysis ready" ? "green" : item.status === "Failed" ? "amber" : "teal"} />
+                  <ProgressBar value={item.progress} tone={item.status === "Analysis ready" ? "green" : item.status === "Failed" || item.status === "Needs review" ? "amber" : "teal"} />
                 </div>
               </div>
             </button>
@@ -271,24 +282,50 @@ function UploadView({
 function AnalysisView({
   documents,
   selectedDocument,
-  onSelect
-}: Readonly<{ documents: AnalyzedDocument[]; selectedDocument?: AnalyzedDocument; onSelect: (id: string) => void }>) {
+  onSelect,
+  onRemove
+}: Readonly<{ documents: AnalyzedDocument[]; selectedDocument?: AnalyzedDocument; onSelect: (id: string) => void; onRemove: (id: string) => void }>) {
   if (!selectedDocument) return <EmptyState title="No analysis yet" body="Upload a document first, then return here to review the report." icon={<BarChart3 size={42} />} />;
+
+  const isUnusedPdf = selectedDocument.mimeType === "application/pdf" && selectedDocument.wordCount === 0;
 
   return (
     <div className="grid gap-5 xl:grid-cols-[320px_1fr_380px]">
       <DocumentList documents={documents} selectedId={selectedDocument.id} onSelect={onSelect} />
       <Card className="overflow-hidden">
-        <CardHeader title="Analysis report" />
+        <CardHeader
+          title="Analysis report"
+          action={
+            isUnusedPdf ? (
+              <button
+                className="focus-ring inline-flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                onClick={() => onRemove(selectedDocument.id)}
+              >
+                <Trash2 size={15} />
+                Delete unused PDF
+              </button>
+            ) : null
+          }
+        />
         <div className="grid gap-5 p-5 lg:grid-cols-[1fr_220px]">
           <div>
-            <h2 className="text-xl font-bold">{selectedDocument.filename}</h2>
-            <p className="mt-1 text-sm text-muted">{selectedDocument.wordCount.toLocaleString()} words - {selectedDocument.documentType}</p>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold">{selectedDocument.filename}</h2>
+                <p className="mt-1 text-sm text-muted">{selectedDocument.wordCount.toLocaleString()} words - {selectedDocument.documentType}</p>
+              </div>
+              <Badge tone={selectedDocument.status === "Analysis ready" ? "green" : "amber"}>{selectedDocument.status}</Badge>
+            </div>
+            {isUnusedPdf ? (
+              <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                This PDF record has no extracted text. Re-upload it to try browser extraction/OCR, or delete it from this session if it is no longer needed.
+              </div>
+            ) : null}
             <h3 className="mt-6 text-sm font-bold">Key information</h3>
-            <div className="mt-3 overflow-hidden rounded-lg border border-line">
+            <div className="mt-3 overflow-hidden rounded-md border border-line">
               {selectedDocument.keyInformation.map((item) => (
                 <div key={item.label} className="grid grid-cols-[150px_1fr] border-b border-line last:border-b-0">
-                  <div className="bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500">{item.label}</div>
+                  <div className="bg-[#f8fafc] px-4 py-3 text-xs font-semibold uppercase text-slate-500">{item.label}</div>
                   <div className="px-4 py-3 text-sm">{item.value}</div>
                 </div>
               ))}
@@ -298,13 +335,22 @@ function AnalysisView({
         </div>
         <div className="border-t border-line p-5">
           <h3 className="text-sm font-bold">Extracted text</h3>
-          <div className="mt-3 max-h-[420px] overflow-auto rounded-lg border border-line p-4 text-sm leading-6">
+          <div className="mt-3 max-h-[420px] overflow-auto rounded-md border border-line bg-[#fbfcfd] p-4 text-sm leading-6">
             {selectedDocument.extractedText ? (
               <pre className="whitespace-pre-wrap font-sans">{selectedDocument.extractedText}</pre>
             ) : (
               <div className="space-y-2 text-amber-700">
                 <p>{selectedDocument.limitations[0] ?? "No extractable text."}</p>
                 {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page to run browser PDF extraction and OCR.</p> : null}
+                {isUnusedPdf ? (
+                  <button
+                    className="focus-ring mt-2 inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                    onClick={() => onRemove(selectedDocument.id)}
+                  >
+                    <Trash2 size={15} />
+                    Delete unused PDF
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -403,7 +449,7 @@ function HistoryView({
       <CardHeader title="Processing history" />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[900px] text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <thead className="bg-[#f8fafc] text-left text-xs uppercase text-slate-500">
             <tr>
               {["Document", "Type", "Words", "AI likelihood", "Uncertainty", "Status", "Uploaded", "Actions"].map((header) => (
                 <th key={header} className="px-5 py-3">{header}</th>
@@ -416,8 +462,8 @@ function HistoryView({
                 <td className="px-5 py-3 font-semibold">{document.filename}</td>
                 <td className="px-5 py-3">{document.documentType}</td>
                 <td className="px-5 py-3">{document.wordCount}</td>
-                <td className="px-5 py-3">{document.aiLikelihood}%</td>
-                <td className="px-5 py-3">+/-{document.uncertainty}%</td>
+                <td className="px-5 py-3">{document.wordCount > 0 ? `${document.aiLikelihood}%` : "N/A"}</td>
+                <td className="px-5 py-3">{document.wordCount > 0 ? `+/-${document.uncertainty}%` : "Text required"}</td>
                 <td className="px-5 py-3"><Badge tone={document.status === "Analysis ready" ? "green" : "amber"}>{document.status}</Badge></td>
                 <td className="px-5 py-3">{new Date(document.uploadedAt).toLocaleString()}</td>
                 <td className="px-5 py-3">
@@ -483,12 +529,24 @@ function DocumentList({ documents, selectedId, onSelect }: Readonly<{ documents:
     <Card>
       <CardHeader title="Documents" />
       <div className="divide-y divide-line">
-        {documents.map((document) => (
-          <button key={document.id} className={cn("w-full p-4 text-left hover:bg-slate-50", selectedId === document.id && "bg-teal/10")} onClick={() => onSelect(document.id)}>
-            <p className="truncate text-sm font-semibold">{document.filename}</p>
-            <p className="mt-1 text-xs text-muted">{document.documentType}</p>
-          </button>
-        ))}
+        {documents.map((document) => {
+          const isUnusedPdf = document.mimeType === "application/pdf" && document.wordCount === 0;
+          return (
+            <button
+              key={document.id}
+              className={cn("w-full p-4 text-left hover:bg-[#f8fafc]", selectedId === document.id && "bg-teal/10")}
+              onClick={() => onSelect(document.id)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{document.filename}</p>
+                  <p className="mt-1 text-xs text-muted">{document.documentType}</p>
+                </div>
+                {isUnusedPdf ? <Badge tone="amber">Unused PDF</Badge> : null}
+              </div>
+            </button>
+          );
+        })}
         {documents.length === 0 ? <EmptyState title="No documents" body="Upload a document to use this page." /> : null}
       </div>
     </Card>
@@ -498,7 +556,7 @@ function DocumentList({ documents, selectedId, onSelect }: Readonly<{ documents:
 function ProbabilityCard({ document }: Readonly<{ document: AnalyzedDocument }>) {
   const hasText = document.wordCount > 0;
   return (
-    <div className="rounded-lg border border-line p-4 text-center">
+    <div className="rounded-md border border-line bg-[#fbfcfd] p-4 text-center">
       <p className="text-xs font-semibold uppercase text-slate-500">AI-likelihood</p>
       <p className="mt-3 text-5xl font-bold text-amber">{hasText ? `${document.aiLikelihood}%` : "N/A"}</p>
       <p className="mt-2 text-sm text-muted">{hasText ? `Uncertainty +/-${document.uncertainty}%` : "Text required"}</p>
@@ -553,7 +611,7 @@ function EmptyState({ title, body, icon }: Readonly<{ title: string; body: strin
 
 function Metric({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
-    <div className="rounded-lg border border-line bg-slate-50 p-4">
+    <div className="rounded-md border border-line bg-[#f8fafc] p-4">
       <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
       <p className="mt-2 text-2xl font-bold">{value}</p>
     </div>

@@ -1,12 +1,12 @@
 import { cn } from "@/lib/utils";
 
 export function Card({ className, children }: Readonly<{ className?: string; children: React.ReactNode }>) {
-  return <section className={cn("rounded-lg border border-line bg-panel shadow-panel", className)}>{children}</section>;
+  return <section className={cn("rounded-md border border-line bg-panel shadow-panel", className)}>{children}</section>;
 }
 
 export function CardHeader({ title, action }: Readonly<{ title: string; action?: React.ReactNode }>) {
   return (
-    <div className="flex items-center justify-between border-b border-line px-5 py-4">
+    <div className="flex min-h-16 items-center justify-between gap-3 border-b border-line bg-[#fbfcfd] px-5 py-4">
       <h2 className="text-base font-semibold text-ink">{title}</h2>
       {action}
     </div>
@@ -22,7 +22,7 @@ export function Badge({ children, tone = "neutral" }: Readonly<{ children: React
     neutral: "border-slate-200 bg-slate-50 text-slate-700"
   };
 
-  return <span className={cn("inline-flex rounded px-2 py-1 text-xs font-medium", tones[tone])}>{children}</span>;
+  return <span className={cn("inline-flex rounded-md border px-2 py-1 text-xs font-medium", tones[tone])}>{children}</span>;
 }
 
 export function ProgressBar({ value, tone = "teal" }: Readonly<{ value: number; tone?: "teal" | "amber" | "green" }>) {
