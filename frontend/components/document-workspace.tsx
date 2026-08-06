@@ -618,11 +618,20 @@ async function extractBrowserOcrText(file: File) {
 function extractEmbeddedPdfImages(bytes: Uint8Array) {
   const source = latin1FromBytes(bytes);
   const images: Uint8Array[] = [];
-  const streamPattern = /<<(?:.|\s)*?\/Subtype\s*\/Image(?:.|\s)*?\/Filter\s*(?:\/DCTDecode|\[\s*\/DCTDecode\s*\])(?:.|\s)*?>>\s*stream\r?\n/g;
+  let searchFrom = 0;
 
-  for (const match of source.matchAll(streamPattern)) {
-    const start = match.index === undefined ? -1 : match.index + match[0].length;
-    if (start < 0) continue;
+  while (searchFrom < source.length) {
+    const streamIndex = source.indexOf("stream", searchFrom);
+    if (streamIndex === -1) break;
+    const header = source.slice(Math.max(0, streamIndex - 1500), streamIndex);
+    searchFrom = streamIndex + 6;
+
+    if (!/\/Subtype\s*\/Image/.test(header) || !/\/DCTDecode/.test(header)) continue;
+
+    let start = streamIndex + 6;
+    if (source[start] === "\r" && source[start + 1] === "\n") start += 2;
+    else if (source[start] === "\n" || source[start] === "\r") start += 1;
+
     const end = source.indexOf("endstream", start);
     if (end <= start) continue;
     let image = bytes.slice(start, end);
