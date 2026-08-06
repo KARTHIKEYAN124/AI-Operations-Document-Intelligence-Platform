@@ -3,7 +3,7 @@ export type SignalTone = "ai" | "human" | "neutral";
 export type AnalysisSignal = {
   name: string;
   value: number;
-  rating: "Low" | "Typical" | "High";
+  rating: "Low" | "Typical" | "High" | "Unavailable";
   explanation: string;
   tone: SignalTone;
 };
@@ -266,35 +266,35 @@ function noExtractedTextSignals(): AnalysisSignal[] {
     {
       name: "Sentence variation",
       value: 0,
-      rating: "Low",
+      rating: "Unavailable",
       tone: "neutral",
       explanation: `${unavailable}: no extracted text was available for sentence analysis.`
     },
     {
       name: "Lexical diversity",
       value: 0,
-      rating: "Low",
+      rating: "Unavailable",
       tone: "neutral",
       explanation: `${unavailable}: no extracted words were available for vocabulary analysis.`
     },
     {
       name: "Repetition",
       value: 0,
-      rating: "Low",
+      rating: "Unavailable",
       tone: "neutral",
       explanation: `${unavailable}: repetition cannot be measured without extracted text.`
     },
     {
       name: "Paragraph consistency",
       value: 0,
-      rating: "Low",
+      rating: "Unavailable",
       tone: "neutral",
       explanation: `${unavailable}: paragraph structure cannot be measured without extracted text.`
     },
     {
       name: "Predictability",
       value: 0,
-      rating: "Low",
+      rating: "Unavailable",
       tone: "neutral",
       explanation: `${unavailable}: predictability cannot be estimated without extracted text.`
     }

@@ -18,7 +18,7 @@ import { Badge, Card, CardHeader, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 type WorkspaceMode = "upload" | "analysis" | "search" | "qa" | "history" | "admin";
-type UploadStatus = "Uploading" | "Processing" | "Analysis ready" | "Needs review" | "Failed";
+type UploadStatus = "Uploading" | "Processing" | "Running OCR" | "Analysis ready" | "Needs review" | "Failed";
 type UploadItem = {
   id: string;
   filename: string;
@@ -71,7 +71,9 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
         const payload = (await response.json()) as AnalyzeResponse;
         if (!payload.ok) throw new Error(payload.error);
 
-        const document = await completeWithBrowserOcr(file, payload.document);
+        const document = await completeWithBrowserOcr(file, payload.document, (status, progress) => {
+          setQueue((current) => current.map((item) => (item.id === id ? { ...item, status, progress } : item)));
+        });
         setDocuments((current) => [document, ...current.filter((item) => item.filename !== document.filename)]);
         setSelectedId(document.id);
         setQueue((current) =>
@@ -152,7 +154,7 @@ function useStoredDocuments() {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (!saved) return;
     try {
-      setDocuments(JSON.parse(saved) as AnalyzedDocument[]);
+      setDocuments((JSON.parse(saved) as AnalyzedDocument[]).map(normalizeStoredDocument));
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
     }
@@ -171,7 +173,7 @@ function PageHeader({
   documents,
   queue
 }: Readonly<{ title: string; description: string; documents: AnalyzedDocument[]; queue: UploadItem[] }>) {
-  const processing = queue.filter((item) => item.status === "Uploading" || item.status === "Processing").length;
+  const processing = queue.filter((item) => item.status === "Uploading" || item.status === "Processing" || item.status === "Running OCR").length;
   return (
     <section className="border-b border-line bg-white px-5 py-4">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-4">
@@ -297,7 +299,14 @@ function AnalysisView({
         <div className="border-t border-line p-5">
           <h3 className="text-sm font-bold">Extracted text</h3>
           <div className="mt-3 max-h-[420px] overflow-auto rounded-lg border border-line p-4 text-sm leading-6">
-            {selectedDocument.extractedText ? <pre className="whitespace-pre-wrap font-sans">{selectedDocument.extractedText}</pre> : <p className="text-amber-700">{selectedDocument.limitations[0] ?? "No extractable text."}</p>}
+            {selectedDocument.extractedText ? (
+              <pre className="whitespace-pre-wrap font-sans">{selectedDocument.extractedText}</pre>
+            ) : (
+              <div className="space-y-2 text-amber-700">
+                <p>{selectedDocument.limitations[0] ?? "No extractable text."}</p>
+                {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page to run browser PDF extraction and OCR.</p> : null}
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -568,9 +577,32 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-async function completeWithBrowserOcr(file: File, document: AnalyzedDocument) {
+function normalizeStoredDocument(document: AnalyzedDocument): AnalyzedDocument {
+  if (document.wordCount > 0) return document;
+
+  const refreshed = analyzePlainText({
+    id: document.id,
+    filename: document.filename,
+    mimeType: document.mimeType,
+    sizeBytes: document.sizeBytes,
+    text: "",
+    limitations: [
+      document.mimeType === "application/pdf"
+        ? "This saved PDF record has no extracted text. Re-upload it to run browser PDF extraction and OCR."
+        : "This saved record has no extracted text. Re-upload it to run extraction again."
+    ]
+  });
+
+  return {
+    ...refreshed,
+    uploadedAt: document.uploadedAt
+  };
+}
+
+async function completeWithBrowserOcr(file: File, document: AnalyzedDocument, onProgress: (status: UploadStatus, progress: number) => void) {
   if (document.wordCount > 0 || !canBrowserOcr(file)) return document;
 
+  onProgress("Running OCR", 76);
   const text = await extractBrowserOcrText(file);
   if (!text) return document;
 
@@ -581,7 +613,9 @@ async function completeWithBrowserOcr(file: File, document: AnalyzedDocument) {
     sizeBytes: document.sizeBytes,
     text,
     limitations: [
-      "Browser OCR extracted text from scanned content. Accuracy depends on image quality.",
+      file.type === "application/pdf" || /\.pdf$/i.test(file.name)
+        ? "Browser PDF extraction/OCR produced this text. Accuracy depends on PDF and scan quality."
+        : "Browser OCR extracted text from scanned content. Accuracy depends on image quality.",
       ...document.limitations
     ]
   });
@@ -592,8 +626,9 @@ function canBrowserOcr(file: File) {
 }
 
 async function extractBrowserOcrText(file: File) {
-  const images = file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? extractEmbeddedPdfImages(new Uint8Array(await file.arrayBuffer())) : [file];
-  if (images.length === 0) return "";
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    return extractBrowserPdfText(file);
+  }
 
   const { createWorker, PSM } = await import("tesseract.js");
   const worker = await createWorker("eng");
@@ -603,11 +638,62 @@ async function extractBrowserOcrText(file: File) {
       preserve_interword_spaces: "1"
     });
     const pages: string[] = [];
-    for (const image of images.slice(0, 3)) {
-      const blob = image instanceof File ? image : new Blob([image], { type: "image/jpeg" });
-      const result = await worker.recognize(blob);
+    const result = await worker.recognize(file);
+    const text = result.data.text.trim();
+    if (text) pages.push(text);
+    return pages.join("\n\n").trim();
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function extractBrowserPdfText(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  try {
+    const textPages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 8); pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const pageText = content.items.map((item) => ("str" in item ? item.str : "")).join(" ").trim();
+      if (pageText) textPages.push(pageText);
+      page.cleanup();
+    }
+
+    const extractedText = textPages.join("\n\n").trim();
+    if (hasUsefulBrowserText(extractedText)) return extractedText;
+
+    return recognizeRenderedPdfPages(pdf);
+  } finally {
+    await pdf.destroy();
+  }
+}
+
+async function recognizeRenderedPdfPages(pdf: { numPages: number; getPage: (pageNumber: number) => Promise<any> }) {
+  const { createWorker, PSM } = await import("tesseract.js");
+  const worker = await createWorker("eng");
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.AUTO,
+      preserve_interword_spaces: "1"
+    });
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 3); pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.8 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const canvasContext = canvas.getContext("2d");
+      if (!canvasContext) continue;
+      await page.render({ canvas, canvasContext, viewport }).promise;
+      const result = await worker.recognize(canvas);
       const text = result.data.text.trim();
       if (text) pages.push(text);
+      page.cleanup();
     }
     return pages.join("\n\n").trim();
   } finally {
@@ -615,41 +701,8 @@ async function extractBrowserOcrText(file: File) {
   }
 }
 
-function extractEmbeddedPdfImages(bytes: Uint8Array) {
-  const source = latin1FromBytes(bytes);
-  const images: Uint8Array[] = [];
-  let searchFrom = 0;
-
-  while (searchFrom < source.length) {
-    const streamIndex = source.indexOf("stream", searchFrom);
-    if (streamIndex === -1) break;
-    const header = source.slice(Math.max(0, streamIndex - 1500), streamIndex);
-    searchFrom = streamIndex + 6;
-
-    if (!/\/Subtype\s*\/Image/.test(header) || !/\/DCTDecode/.test(header)) continue;
-
-    let start = streamIndex + 6;
-    if (source[start] === "\r" && source[start + 1] === "\n") start += 2;
-    else if (source[start] === "\n" || source[start] === "\r") start += 1;
-
-    const end = source.indexOf("endstream", start);
-    if (end <= start) continue;
-    let image = bytes.slice(start, end);
-    while (image.length > 0 && (image[image.length - 1] === 0x0a || image[image.length - 1] === 0x0d || image[image.length - 1] === 0x20)) {
-      image = image.slice(0, image.length - 1);
-    }
-    if (image.length > 100 && image[0] === 0xff && image[1] === 0xd8) {
-      images.push(image);
-    }
-  }
-
-  return images;
-}
-
-function latin1FromBytes(bytes: Uint8Array) {
-  let output = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    output += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return output;
+function hasUsefulBrowserText(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const alphaWords = normalized.match(/[A-Za-z][A-Za-z0-9'-]{2,}/g) ?? [];
+  return normalized.length >= 30 && alphaWords.length >= 4;
 }
