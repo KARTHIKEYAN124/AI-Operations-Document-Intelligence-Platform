@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aiops
+      POSTGRES_USER: aiops
+      POSTGRES_PASSWORD: aiops
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://aiops:aiops@postgres:5432/aiops
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      JWT_SECRET_KEY: change-this-in-production
+      ADMIN_EMAIL: admin@aiops.com
+      ADMIN_PASSWORD: Admin@123
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+
+volumes:
+  postgres-data:
+  qdrant-data:
