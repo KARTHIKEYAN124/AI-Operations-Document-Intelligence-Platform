@@ -13,7 +13,7 @@ import {
   UploadCloud,
   Users
 } from "lucide-react";
-import { answerQuestion, searchDocuments, type AnalyzedDocument, type AnalyzeResponse, type TextChunk } from "@/lib/document-analysis";
+import { analyzePlainText, answerQuestion, searchDocuments, type AnalyzedDocument, type AnalyzeResponse, type TextChunk } from "@/lib/document-analysis";
 import { Badge, Card, CardHeader, ProgressBar } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -71,10 +71,11 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
         const payload = (await response.json()) as AnalyzeResponse;
         if (!payload.ok) throw new Error(payload.error);
 
-        setDocuments((current) => [payload.document, ...current.filter((document) => document.filename !== payload.document.filename)]);
-        setSelectedId(payload.document.id);
+        const document = await completeWithBrowserOcr(file, payload.document);
+        setDocuments((current) => [document, ...current.filter((item) => item.filename !== document.filename)]);
+        setSelectedId(document.id);
         setQueue((current) =>
-          current.map((item) => (item.id === id ? { ...item, status: payload.document.status, progress: 100, document: payload.document } : item))
+          current.map((item) => (item.id === id ? { ...item, status: document.status, progress: 100, document } : item))
         );
       } catch (error) {
         setQueue((current) =>
@@ -565,4 +566,81 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function completeWithBrowserOcr(file: File, document: AnalyzedDocument) {
+  if (document.wordCount > 0 || !canBrowserOcr(file)) return document;
+
+  const text = await extractBrowserOcrText(file);
+  if (!text) return document;
+
+  return analyzePlainText({
+    id: document.id,
+    filename: document.filename,
+    mimeType: document.mimeType,
+    sizeBytes: document.sizeBytes,
+    text,
+    limitations: [
+      "Browser OCR extracted text from scanned content. Accuracy depends on image quality.",
+      ...document.limitations
+    ]
+  });
+}
+
+function canBrowserOcr(file: File) {
+  return /(\.pdf|\.png|\.jpe?g|\.tiff?)$/i.test(file.name) || /^(application\/pdf|image\/)/.test(file.type);
+}
+
+async function extractBrowserOcrText(file: File) {
+  const images = file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? extractEmbeddedPdfImages(new Uint8Array(await file.arrayBuffer())) : [file];
+  if (images.length === 0) return "";
+
+  const { createWorker, PSM } = await import("tesseract.js");
+  const worker = await createWorker("eng");
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.AUTO,
+      preserve_interword_spaces: "1"
+    });
+    const pages: string[] = [];
+    for (const image of images.slice(0, 3)) {
+      const blob = image instanceof File ? image : new Blob([image], { type: "image/jpeg" });
+      const result = await worker.recognize(blob);
+      const text = result.data.text.trim();
+      if (text) pages.push(text);
+    }
+    return pages.join("\n\n").trim();
+  } finally {
+    await worker.terminate();
+  }
+}
+
+function extractEmbeddedPdfImages(bytes: Uint8Array) {
+  const source = latin1FromBytes(bytes);
+  const images: Uint8Array[] = [];
+  const streamPattern = /<<(?:.|\s)*?\/Subtype\s*\/Image(?:.|\s)*?\/Filter\s*(?:\/DCTDecode|\[\s*\/DCTDecode\s*\])(?:.|\s)*?>>\s*stream\r?\n/g;
+
+  for (const match of source.matchAll(streamPattern)) {
+    const start = match.index === undefined ? -1 : match.index + match[0].length;
+    if (start < 0) continue;
+    const end = source.indexOf("endstream", start);
+    if (end <= start) continue;
+    let image = bytes.slice(start, end);
+    while (image.length > 0 && (image[image.length - 1] === 0x0a || image[image.length - 1] === 0x0d || image[image.length - 1] === 0x20)) {
+      image = image.slice(0, image.length - 1);
+    }
+    if (image.length > 100 && image[0] === 0xff && image[1] === 0xd8) {
+      images.push(image);
+    }
+  }
+
+  return images;
+}
+
+function latin1FromBytes(bytes: Uint8Array) {
+  let output = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    output += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return output;
 }

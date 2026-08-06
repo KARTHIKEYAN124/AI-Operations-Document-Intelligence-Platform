@@ -1,5 +1,3 @@
-import { spawn } from "child_process";
-import { join } from "path";
 import { NextRequest, NextResponse } from "next/server";
 import mammoth from "mammoth";
 import { analyzePlainText, type AnalyzeResponse } from "@/lib/document-analysis";
@@ -8,8 +6,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const OCR_PAGE_LIMIT = 3;
-const OCR_TIMEOUT_MS = 25_000;
 const ALLOWED_TYPES = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -76,43 +72,20 @@ async function extractText(file: File, buffer: Buffer) {
 
     const embeddedImages = extractEmbeddedPdfImages(buffer);
     if (embeddedImages.length > 0) {
-      const ocr = await extractPdfImageTextWithOcr(embeddedImages);
-      if (ocr.text) {
-        return {
-          text: ocr.text,
-          limitations: [
-            `OCR extracted text from ${ocr.pagesProcessed} of ${ocr.pageCount} embedded PDF image${ocr.pageCount === 1 ? "" : "s"}.`,
-            ...(ocr.pageCount > ocr.pagesProcessed ? [`OCR is limited to the first ${OCR_PAGE_LIMIT} embedded images in this live Vercel demo.`] : [])
-          ]
-        };
-      }
       return {
         text: "",
-        limitations: [
-          "Embedded PDF images were found, but OCR could not extract readable text. Try a higher-resolution scan.",
-          ...(ocr.error ? [`OCR detail: ${ocr.error}`] : [])
-        ]
+        limitations: ["This PDF appears to contain scanned page images. Browser OCR will attempt extraction after upload."]
       };
-    }
-
-    const parsed = await extractPdfTextWithParser(buffer);
-    if (parsed.text) {
-      return { text: parsed.text, limitations: [] };
     }
 
     return {
       text: "",
-      limitations: [
-        "No selectable or OCR-readable PDF text could be extracted. Try a clearer scan or a smaller PDF.",
-        ...(parsed.error ? [`Selectable-text parser detail: ${parsed.error}`] : [])
-      ]
+      limitations: ["No literal PDF text or embedded scan images were found. Try DOCX/TXT export or upload a scanned/image PDF for browser OCR."]
     };
   }
 
   const imageOcr = await extractImageTextWithOcr(buffer);
-  return imageOcr.text
-    ? { text: imageOcr.text, limitations: ["OCR extracted text from the uploaded image. Accuracy depends on scan quality."] }
-    : { text: "", limitations: [`Image OCR could not extract readable text.${imageOcr.error ? ` OCR detail: ${imageOcr.error}` : ""}`] };
+  return imageOcr;
 }
 
 function isAllowed(file: File) {
@@ -130,142 +103,12 @@ function inferMimeType(filename: string) {
   return "application/octet-stream";
 }
 
-async function ensureCanvasGlobals() {
-  const canvas = await import("@napi-rs/canvas");
-  const globals = globalThis as Record<string, unknown>;
-  globals.DOMMatrix ??= canvas.DOMMatrix;
-  globals.DOMPoint ??= canvas.DOMPoint;
-  globals.DOMRect ??= canvas.DOMRect;
-  globals.ImageData ??= canvas.ImageData;
-  globals.Path2D ??= canvas.Path2D;
-  return canvas;
-}
-
-async function extractPdfTextWithParser(buffer: Buffer) {
-  let parser: { getText: () => Promise<{ text: string }>; destroy: () => Promise<void> } | undefined;
-  try {
-    await ensureCanvasGlobals();
-    const { PDFParse } = await import("pdf-parse");
-    parser = new PDFParse({ data: buffer });
-    const result = await withTimeout(parser.getText(), 8000);
-    return hasUsefulExtractedText(result.text) ? { text: result.text, error: "" } : { text: "", error: "No useful selectable text found." };
-  } catch (error) {
-    return { text: "", error: error instanceof Error ? error.message : "PDF parser failed." };
-  } finally {
-    await parser?.destroy().catch(() => undefined);
-  }
-}
-
-async function extractPdfImageTextWithOcr(images: Buffer[]) {
-  try {
-    if (images.length === 0) {
-      return { text: "", pageCount: 0, pagesProcessed: 0, error: "No JPEG scan images were found inside the PDF." };
-    }
-    const imagesToProcess = images.slice(0, OCR_PAGE_LIMIT);
-    const text = await withTimeout(recognizeImages(imagesToProcess), 25000);
-    return { text, pageCount: images.length, pagesProcessed: imagesToProcess.length, error: "" };
-  } catch (error) {
-    return { text: "", pageCount: 0, pagesProcessed: 0, error: error instanceof Error ? error.message : "OCR failed." };
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number) {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000} seconds.`)), ms);
-    })
-  ]);
-}
-
 async function extractImageTextWithOcr(buffer: Buffer) {
-  try {
-    return { text: await recognizeImages([buffer]), error: "" };
-  } catch (error) {
-    return { text: "", error: error instanceof Error ? error.message : "OCR failed." };
-  }
+  return {
+    text: "",
+    limitations: [`Image file detected (${buffer.length.toLocaleString()} bytes). Browser OCR will attempt extraction after upload.`]
+  };
 }
-
-async function recognizeImages(images: Buffer[]) {
-  return runOcrChildProcess({
-    cachePath: process.env.VERCEL ? "/tmp/tesseract-cache" : join(process.cwd(), "tmp", "tess-cache"),
-    images: images.map((image) => image.toString("base64")),
-    langPath: join(process.cwd(), "node_modules", "@tesseract.js-data", "eng", "4.0.0")
-  });
-}
-
-function runOcrChildProcess(payload: { cachePath: string; images: string[]; langPath: string }) {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", OCR_CHILD_SCRIPT], {
-      cwd: process.cwd(),
-      env: ocrChildEnvironment() as NodeJS.ProcessEnv
-    });
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`OCR timed out after ${OCR_TIMEOUT_MS / 1000} seconds.`));
-    }, OCR_TIMEOUT_MS);
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-      reject(new Error(stderr.trim() || `OCR worker exited with code ${code}.`));
-    });
-
-    child.stdin?.end(JSON.stringify(payload));
-  });
-}
-
-function ocrChildEnvironment() {
-  const allowed = ["PATH", "Path", "SystemRoot", "TEMP", "TMP", "HOME", "USERPROFILE", "VERCEL", "VERCEL_ENV"];
-  return Object.fromEntries(allowed.map((key) => [key, process.env[key]]).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-}
-
-const OCR_CHILD_SCRIPT = `
-import { createWorker, PSM } from "tesseract.js";
-
-let input = "";
-for await (const chunk of process.stdin) {
-  input += chunk;
-}
-
-const payload = JSON.parse(input);
-const worker = await createWorker("eng", 1, {
-  cachePath: payload.cachePath,
-  gzip: true,
-  langPath: payload.langPath
-});
-
-try {
-  await worker.setParameters({
-    tessedit_pageseg_mode: PSM.AUTO,
-    preserve_interword_spaces: "1"
-  });
-  const pages = [];
-  for (const encoded of payload.images) {
-    const result = await worker.recognize(Buffer.from(encoded, "base64"));
-    const text = result.data.text.trim();
-    if (text) pages.push(text);
-  }
-  process.stdout.write(pages.join("\\n\\n").trim());
-} finally {
-  await worker.terminate();
-}
-`;
 
 function extractPdfLiteralText(buffer: Buffer) {
   const source = buffer.toString("latin1");
