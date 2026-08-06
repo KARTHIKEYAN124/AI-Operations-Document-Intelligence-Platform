@@ -229,7 +229,7 @@ function UploadView({
           <span>
             <UploadCloud className="mx-auto text-teal" size={64} />
             <span className="mt-5 block text-xl font-bold">Drop files to analyze</span>
-            <span className="mt-2 block text-sm text-muted">TXT, Markdown, DOCX, and selectable PDFs extract text. Images/scans need OCR.</span>
+            <span className="mt-2 block text-sm text-muted">TXT, Markdown, DOCX, selectable PDFs, and scanned PDFs/images are extracted with text parsing plus OCR.</span>
             <button type="button" className="mt-5 rounded-md bg-teal px-5 py-2.5 text-sm font-semibold text-white" onClick={onBrowse}>
               Browse files
             </button>
