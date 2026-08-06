@@ -486,12 +486,15 @@ function DocumentList({ documents, selectedId, onSelect }: Readonly<{ documents:
 }
 
 function ProbabilityCard({ document }: Readonly<{ document: AnalyzedDocument }>) {
+  const hasText = document.wordCount > 0;
   return (
     <div className="rounded-lg border border-line p-4 text-center">
       <p className="text-xs font-semibold uppercase text-slate-500">AI-likelihood</p>
-      <p className="mt-3 text-5xl font-bold text-amber">{document.aiLikelihood}%</p>
-      <p className="mt-2 text-sm text-muted">Uncertainty +/-{document.uncertainty}%</p>
-      <p className="mt-3 text-xs leading-5 text-muted">Probabilistic estimate, not proof.</p>
+      <p className="mt-3 text-5xl font-bold text-amber">{hasText ? `${document.aiLikelihood}%` : "N/A"}</p>
+      <p className="mt-2 text-sm text-muted">{hasText ? `Uncertainty +/-${document.uncertainty}%` : "Text required"}</p>
+      <p className="mt-3 text-xs leading-5 text-muted">
+        {hasText ? "Probabilistic estimate, not proof." : "Writing-style analysis runs after text extraction succeeds."}
+      </p>
     </div>
   );
 }

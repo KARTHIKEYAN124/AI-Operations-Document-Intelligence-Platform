@@ -65,20 +65,30 @@ async function extractText(file: File, buffer: Buffer) {
   }
 
   if (type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    let parser: { getText: () => Promise<{ text: string }>; destroy: () => Promise<void> } | undefined;
     try {
       const { PDFParse } = await import("pdf-parse");
-      const parser = new PDFParse({ data: buffer });
+      parser = new PDFParse({ data: buffer });
       const result = await parser.getText();
-      await parser.destroy();
       return {
         text: result.text,
         limitations: result.text.trim() ? [] : ["No selectable text was found. Scanned PDFs need OCR."]
       };
-    } catch {
+    } catch (error) {
+      const fallbackText = extractPdfLiteralText(buffer);
+      const detail = error instanceof Error ? error.message : "PDF parser failed.";
+      if (fallbackText) {
+        return {
+          text: fallbackText,
+          limitations: [`Used lightweight PDF text extraction fallback because the full parser failed: ${detail}`]
+        };
+      }
       return {
         text: "",
-        limitations: ["PDF text extraction is unavailable in this serverless runtime. TXT, Markdown, and DOCX analysis are fully supported."]
+        limitations: [`No selectable PDF text could be extracted. Scanned or image-only PDFs need OCR. Parser detail: ${detail}`]
       };
+    } finally {
+      await parser?.destroy().catch(() => undefined);
     }
   }
 
@@ -101,6 +111,40 @@ function inferMimeType(filename: string) {
   if (/\.jpe?g$/i.test(filename)) return "image/jpeg";
   if (/\.tiff?$/i.test(filename)) return "image/tiff";
   return "application/octet-stream";
+}
+
+function extractPdfLiteralText(buffer: Buffer) {
+  const source = buffer.toString("latin1");
+  const pieces: string[] = [];
+
+  for (const match of source.matchAll(/\[([\s\S]*?)\]\s*TJ/g)) {
+    const array = match[1] ?? "";
+    pieces.push(...decodePdfStrings(array));
+  }
+  for (const match of source.matchAll(/(?:^|[^\\])\(((?:\\.|[^\\)])*)\)\s*Tj/g)) {
+    const text = match[1];
+    if (text) pieces.push(decodePdfString(text));
+  }
+
+  return pieces
+    .map((piece) => piece.replace(/\s+/g, " ").trim())
+    .filter((piece) => /[A-Za-z0-9]/.test(piece))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function decodePdfStrings(value: string) {
+  return Array.from(value.matchAll(/(?:^|[^\\])\(((?:\\.|[^\\)])*)\)/g), (match) => decodePdfString(match[1] ?? ""));
+}
+
+function decodePdfString(value: string) {
+  return value
+    .replace(/\\([nrtbf()\\])/g, (_, escaped: string) => {
+      const replacements: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", "(": "(", ")": ")", "\\": "\\" };
+      return replacements[escaped] ?? escaped;
+    })
+    .replace(/\\([0-7]{1,3})/g, (_, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)));
 }
 
 function jsonError(error: string, status: number) {

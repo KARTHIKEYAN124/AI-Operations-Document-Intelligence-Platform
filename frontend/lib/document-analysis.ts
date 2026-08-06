@@ -62,6 +62,32 @@ export function analyzePlainText(input: {
 }): AnalyzedDocument {
   const extractedText = normalizeText(input.text);
   const words = extractedText.match(WORD_RE) ?? [];
+  const baseDocument = {
+    id: input.id,
+    filename: input.filename,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    uploadedAt: new Date().toISOString(),
+    documentType: classifyDocument(input.filename, extractedText),
+    wordCount: words.length,
+    characterCount: extractedText.length,
+    keyInformation: extractKeyInformation(input.filename, extractedText, words.length),
+    extractedText,
+    chunks: chunkText(extractedText),
+    limitations: input.limitations ?? []
+  };
+
+  if (words.length === 0) {
+    return {
+      ...baseDocument,
+      status: "Needs review",
+      aiLikelihood: 0,
+      uncertainty: 0,
+      confidence: "Low",
+      signals: noExtractedTextSignals()
+    };
+  }
+
   const sentences = extractedText
     .split(/[.!?]+/)
     .map((sentence) => sentence.trim())
@@ -88,19 +114,11 @@ export function analyzePlainText(input: {
   const uncertainty = clamp(0.08 + (words.length < 300 ? 0.16 : 0) + (sentences.length < 8 ? 0.08 : 0), 0.08, 0.32);
 
   return {
-    id: input.id,
-    filename: input.filename,
-    mimeType: input.mimeType,
-    sizeBytes: input.sizeBytes,
+    ...baseDocument,
     status: extractedText.length > 0 ? "Analysis ready" : "Needs review",
-    uploadedAt: new Date().toISOString(),
-    documentType: classifyDocument(input.filename, extractedText),
     aiLikelihood: Math.round(aiLikelihood * 100),
     uncertainty: Math.round(uncertainty * 100),
     confidence: confidenceFromUncertainty(uncertainty, words.length),
-    wordCount: words.length,
-    characterCount: extractedText.length,
-    keyInformation: extractKeyInformation(input.filename, extractedText, words.length),
     signals: [
       {
         name: "Sentence variation",
@@ -137,10 +155,7 @@ export function analyzePlainText(input: {
         tone: predictability > 0.72 ? "ai" : "human",
         explanation: predictability > 0.72 ? "The prose is more predictable than typical human baselines." : "The text has a balanced predictability profile."
       }
-    ],
-    extractedText,
-    chunks: chunkText(extractedText),
-    limitations: input.limitations ?? []
+    ]
   };
 }
 
@@ -243,6 +258,47 @@ function chunkText(text: string, size = 900, overlap = 140): TextChunk[] {
     start = end - overlap;
   }
   return chunks;
+}
+
+function noExtractedTextSignals(): AnalysisSignal[] {
+  const unavailable = "Unavailable";
+  return [
+    {
+      name: "Sentence variation",
+      value: 0,
+      rating: "Low",
+      tone: "neutral",
+      explanation: `${unavailable}: no extracted text was available for sentence analysis.`
+    },
+    {
+      name: "Lexical diversity",
+      value: 0,
+      rating: "Low",
+      tone: "neutral",
+      explanation: `${unavailable}: no extracted words were available for vocabulary analysis.`
+    },
+    {
+      name: "Repetition",
+      value: 0,
+      rating: "Low",
+      tone: "neutral",
+      explanation: `${unavailable}: repetition cannot be measured without extracted text.`
+    },
+    {
+      name: "Paragraph consistency",
+      value: 0,
+      rating: "Low",
+      tone: "neutral",
+      explanation: `${unavailable}: paragraph structure cannot be measured without extracted text.`
+    },
+    {
+      name: "Predictability",
+      value: 0,
+      rating: "Low",
+      tone: "neutral",
+      explanation: `${unavailable}: predictability cannot be estimated without extracted text.`
+    }
+  ];
 }
 
 function tokenize(value: string) {
