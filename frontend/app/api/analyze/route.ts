@@ -8,12 +8,19 @@ export const maxDuration = 60;
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const ALLOWED_TYPES = new Set([
   "application/pdf",
+  "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
   "text/markdown",
+  "text/csv",
+  "application/json",
+  "application/rtf",
+  "text/rtf",
   "image/png",
   "image/jpeg",
-  "image/tiff"
+  "image/tiff",
+  "image/webp",
+  "image/bmp"
 ]);
 
 export async function POST(request: NextRequest) {
@@ -28,10 +35,10 @@ export async function POST(request: NextRequest) {
       return jsonError("The uploaded document is empty.", 400);
     }
     if (file.size > MAX_FILE_SIZE) {
-      return jsonError("File size must be 15 MB or less for this live demo.", 400);
+      return jsonError("File size must be 15 MB or less for browser-based extraction.", 400);
     }
     if (!isAllowed(file)) {
-      return jsonError("Supported files: PDF, DOCX, TXT, Markdown, PNG, JPG, and TIFF.", 400);
+      return jsonError("Supported files: PDF, DOC, DOCX, TXT, Markdown, RTF, CSV, JSON, PNG, JPG, TIFF, WEBP, and BMP.", 400);
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -55,8 +62,15 @@ export async function POST(request: NextRequest) {
 async function extractText(file: File, buffer: Buffer) {
   const type = file.type || inferMimeType(file.name);
 
-  if (type === "text/plain" || type === "text/markdown" || /\.(txt|md|markdown)$/i.test(file.name)) {
+  if (isPlainTextLike(type, file.name)) {
     return { text: buffer.toString("utf-8"), limitations: [] };
+  }
+
+  if (type === "application/msword" || /\.doc$/i.test(file.name)) {
+    return {
+      text: extractLegacyDocText(buffer),
+      limitations: ["Used best-effort legacy DOC text extraction. Convert to DOCX for higher fidelity."]
+    };
   }
 
   if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || /\.docx$/i.test(file.name)) {
@@ -89,18 +103,36 @@ async function extractText(file: File, buffer: Buffer) {
 }
 
 function isAllowed(file: File) {
-  return ALLOWED_TYPES.has(file.type) || /\.(pdf|docx|txt|md|markdown|png|jpe?g|tiff?)$/i.test(file.name);
+  return ALLOWED_TYPES.has(file.type) || /\.(pdf|docx?|txt|md|markdown|rtf|csv|json|png|jpe?g|tiff?|webp|bmp)$/i.test(file.name);
 }
 
 function inferMimeType(filename: string) {
   if (/\.pdf$/i.test(filename)) return "application/pdf";
+  if (/\.doc$/i.test(filename)) return "application/msword";
   if (/\.docx$/i.test(filename)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (/\.rtf$/i.test(filename)) return "application/rtf";
+  if (/\.csv$/i.test(filename)) return "text/csv";
+  if (/\.json$/i.test(filename)) return "application/json";
   if (/\.(md|markdown)$/i.test(filename)) return "text/markdown";
   if (/\.txt$/i.test(filename)) return "text/plain";
   if (/\.png$/i.test(filename)) return "image/png";
   if (/\.jpe?g$/i.test(filename)) return "image/jpeg";
   if (/\.tiff?$/i.test(filename)) return "image/tiff";
+  if (/\.webp$/i.test(filename)) return "image/webp";
+  if (/\.bmp$/i.test(filename)) return "image/bmp";
   return "application/octet-stream";
+}
+
+function isPlainTextLike(type: string, filename: string) {
+  return (
+    type === "text/plain" ||
+    type === "text/markdown" ||
+    type === "text/csv" ||
+    type === "application/json" ||
+    type === "application/rtf" ||
+    type === "text/rtf" ||
+    /\.(txt|md|markdown|rtf|csv|json)$/i.test(filename)
+  );
 }
 
 async function extractImageTextWithOcr(buffer: Buffer) {
@@ -128,6 +160,14 @@ function extractPdfLiteralText(buffer: Buffer) {
     .filter((piece) => /[A-Za-z0-9]/.test(piece))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractLegacyDocText(buffer: Buffer) {
+  return buffer
+    .toString("latin1")
+    .replace(/[^\x09\x0a\x0d\x20-\x7e]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 

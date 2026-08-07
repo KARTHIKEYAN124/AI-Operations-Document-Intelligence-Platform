@@ -106,7 +106,7 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
   }
 
   return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#f5f7fa]">
+    <div className="min-h-[calc(100vh-80px)] bg-white/70">
       <PageHeader title={title} description={description} documents={documents} queue={queue} />
       <div className="mx-auto max-w-[1500px] p-5">
         {mode === "upload" ? (
@@ -176,10 +176,10 @@ function PageHeader({
   const processing = queue.filter((item) => item.status === "Uploading" || item.status === "Processing" || item.status === "Running OCR").length;
   const stalePdfs = documents.filter((document) => document.mimeType === "application/pdf" && document.wordCount === 0).length;
   return (
-    <section className="border-b border-line bg-white px-5 py-5">
+    <section className="border-b border-line bg-white/95 px-5 py-5 backdrop-blur">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal">Document Intelligence</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-teal">Document Intelligence Workspace</p>
           <h1 className="mt-1 text-2xl font-bold">{title}</h1>
           <p className="mt-1 text-sm text-muted">{description}</p>
         </div>
@@ -188,6 +188,7 @@ function PageHeader({
           <Badge tone="green">{documents.filter((document) => document.status === "Analysis ready").length} ready</Badge>
           <Badge tone={processing ? "amber" : "neutral"}>{processing} processing</Badge>
           <Badge tone={stalePdfs ? "amber" : "neutral"}>{stalePdfs} stale PDFs</Badge>
+          <Badge tone="blue">all-page OCR</Badge>
         </div>
       </div>
     </section>
@@ -221,7 +222,7 @@ function UploadView({
 }>) {
   return (
     <div className="grid gap-5 xl:grid-cols-[430px_1fr]">
-      <Card className="p-5">
+      <Card className="overflow-hidden p-5">
         <label
           className={cn(
             "grid min-h-[320px] cursor-pointer place-items-center rounded-md border border-dashed p-6 text-center transition",
@@ -231,11 +232,12 @@ function UploadView({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
         >
-          <input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.docx,.txt,.md,.markdown,.png,.jpg,.jpeg,.tif,.tiff" onChange={onFileChange} />
+            <input ref={inputRef} className="hidden" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.markdown,.rtf,.csv,.json,.png,.jpg,.jpeg,.tif,.tiff,.webp,.bmp" onChange={onFileChange} />
           <span>
             <UploadCloud className="mx-auto text-teal" size={64} />
             <span className="mt-5 block text-xl font-bold">Drop files to analyze</span>
-            <span className="mt-2 block text-sm text-muted">TXT, Markdown, DOCX, selectable PDFs, and scanned PDFs/images are extracted with text parsing plus OCR.</span>
+            <span className="mt-2 block text-sm text-muted">PDF, DOC, DOCX, TXT, Markdown, RTF, CSV, JSON, and common images are extracted with text parsing plus OCR.</span>
+            <span className="mt-2 block text-xs font-semibold uppercase tracking-[0.08em] text-amber">PDF OCR attempts every page</span>
             <button type="button" className="mt-5 rounded-md bg-teal px-5 py-2.5 text-sm font-semibold text-white" onClick={onBrowse}>
               Browse files
             </button>
@@ -318,7 +320,7 @@ function AnalysisView({
             </div>
             {isUnusedPdf ? (
               <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                This PDF record has no extracted text. Re-upload it to try browser extraction/OCR, or delete it from this session if it is no longer needed.
+                This PDF record has no extracted text. Re-upload it to run all-page browser extraction/OCR, or delete it from this session if it is no longer needed.
               </div>
             ) : null}
             <h3 className="mt-6 text-sm font-bold">Key information</h3>
@@ -341,7 +343,7 @@ function AnalysisView({
             ) : (
               <div className="space-y-2 text-amber-700">
                 <p>{selectedDocument.limitations[0] ?? "No extractable text."}</p>
-                {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page to run browser PDF extraction and OCR.</p> : null}
+                {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page to run browser PDF extraction and OCR across every page.</p> : null}
                 {isUnusedPdf ? (
                   <button
                     className="focus-ring mt-2 inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
@@ -646,7 +648,7 @@ function normalizeStoredDocument(document: AnalyzedDocument): AnalyzedDocument {
     text: "",
     limitations: [
       document.mimeType === "application/pdf"
-        ? "This saved PDF record has no extracted text. Re-upload it to run browser PDF extraction and OCR."
+        ? "This saved PDF record has no extracted text. Re-upload it to run browser PDF extraction and OCR across every page."
         : "This saved record has no extracted text. Re-upload it to run extraction again."
     ]
   });
@@ -661,7 +663,7 @@ async function completeWithBrowserOcr(file: File, document: AnalyzedDocument, on
   if (document.wordCount > 0 || !canBrowserOcr(file)) return document;
 
   onProgress("Running OCR", 76);
-  const text = await extractBrowserOcrText(file);
+  const text = await extractBrowserOcrText(file, onProgress);
   if (!text) return document;
 
   return analyzePlainText({
@@ -680,12 +682,12 @@ async function completeWithBrowserOcr(file: File, document: AnalyzedDocument, on
 }
 
 function canBrowserOcr(file: File) {
-  return /(\.pdf|\.png|\.jpe?g|\.tiff?)$/i.test(file.name) || /^(application\/pdf|image\/)/.test(file.type);
+  return /(\.pdf|\.png|\.jpe?g|\.tiff?|\.webp|\.bmp)$/i.test(file.name) || /^(application\/pdf|image\/)/.test(file.type);
 }
 
-async function extractBrowserOcrText(file: File) {
+async function extractBrowserOcrText(file: File, onProgress?: (status: UploadStatus, progress: number) => void) {
   if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-    return extractBrowserPdfText(file);
+    return extractBrowserPdfText(file, onProgress);
   }
 
   const { createWorker, PSM } = await import("tesseract.js");
@@ -705,58 +707,59 @@ async function extractBrowserOcrText(file: File) {
   }
 }
 
-async function extractBrowserPdfText(file: File) {
+async function extractBrowserPdfText(file: File, onProgress?: (status: UploadStatus, progress: number) => void) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
   const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  let worker: Awaited<ReturnType<typeof createTesseractWorker>> | null = null;
   try {
-    const textPages: string[] = [];
-    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 8); pageNumber += 1) {
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      onProgress?.("Running OCR", 76 + Math.floor(((pageNumber - 1) / Math.max(1, pdf.numPages)) * 20));
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
       const pageText = content.items.map((item) => ("str" in item ? item.str : "")).join(" ").trim();
-      if (pageText) textPages.push(pageText);
+      if (hasUsefulBrowserText(pageText)) {
+        pages.push(`[Page ${pageNumber}]\n${pageText}`);
+        page.cleanup();
+        continue;
+      }
+
+      worker ??= await createTesseractWorker();
+      const ocrText = await recognizeRenderedPdfPage(page, pageNumber, worker);
+      if (ocrText) pages.push(`[Page ${pageNumber}]\n${ocrText}`);
       page.cleanup();
     }
-
-    const extractedText = textPages.join("\n\n").trim();
-    if (hasUsefulBrowserText(extractedText)) return extractedText;
-
-    return recognizeRenderedPdfPages(pdf);
+    onProgress?.("Running OCR", 98);
+    return pages.join("\n\n").trim();
   } finally {
+    if (worker) await worker.terminate();
     await pdf.destroy();
   }
 }
 
-async function recognizeRenderedPdfPages(pdf: { numPages: number; getPage: (pageNumber: number) => Promise<any> }) {
+async function createTesseractWorker() {
   const { createWorker, PSM } = await import("tesseract.js");
   const worker = await createWorker("eng");
-  try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: PSM.AUTO,
-      preserve_interword_spaces: "1"
-    });
-    const pages: string[] = [];
-    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 3); pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1.8 });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      const canvasContext = canvas.getContext("2d");
-      if (!canvasContext) continue;
-      await page.render({ canvas, canvasContext, viewport }).promise;
-      const result = await worker.recognize(canvas);
-      const text = result.data.text.trim();
-      if (text) pages.push(text);
-      page.cleanup();
-    }
-    return pages.join("\n\n").trim();
-  } finally {
-    await worker.terminate();
-  }
+  await worker.setParameters({
+    tessedit_pageseg_mode: PSM.AUTO,
+    preserve_interword_spaces: "1"
+  });
+  return worker;
+}
+
+async function recognizeRenderedPdfPage(page: any, pageNumber: number, worker: Awaited<ReturnType<typeof createTesseractWorker>>) {
+  const viewport = page.getViewport({ scale: 1.8 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const canvasContext = canvas.getContext("2d");
+  if (!canvasContext) return "";
+  await page.render({ canvas, canvasContext, viewport }).promise;
+  const result = await worker.recognize(canvas);
+  return result.data.text.trim();
 }
 
 function hasUsefulBrowserText(text: string) {

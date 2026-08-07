@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 export function Card({ className, children }: Readonly<{ className?: string; children: React.ReactNode }>) {
-  return <section className={cn("rounded-md border border-line bg-panel shadow-panel", className)}>{children}</section>;
+  return <section className={cn("rounded-md border border-[#d7e1e8] bg-panel shadow-panel", className)}>{children}</section>;
 }
 
 export function CardHeader({ title, action }: Readonly<{ title: string; action?: React.ReactNode }>) {

@@ -31,22 +31,29 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
-      <header className="fixed left-0 right-0 top-0 z-20 flex h-20 items-center border-b border-[#1f2933] bg-[#101418] px-5 text-white">
+      <header className="fixed left-0 right-0 top-0 z-20 flex h-20 items-center border-b border-[#1d252d] bg-[#101418] px-5 text-white">
         <div className="flex min-w-[280px] items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-md bg-teal text-xl font-black text-white shadow-[0_10px_24px_rgba(8,127,131,0.28)]">AI</div>
+          <div className="grid size-11 place-items-center rounded-md border border-cyan-300/20 bg-[#063f45] text-xl font-black text-cyan-100 shadow-[0_10px_24px_rgba(8,127,131,0.28)]">DL</div>
           <div>
-            <p className="text-xl font-bold leading-tight">AI Operations</p>
-            <p className="text-sm text-white/60">Document Intelligence Console</p>
+            <p className="text-xl font-bold leading-tight">DocuLab AI</p>
+            <p className="text-sm text-white/60">Operations & Document Intelligence</p>
           </div>
+        </div>
+        <div className="mx-8 hidden h-6 w-px bg-white/10 lg:block" />
+        <div className="hidden min-w-0 items-center gap-2 text-sm text-white/60 lg:flex">
+          <span className="text-white">AI Operations</span>
+          <span>/</span>
+          <span>Document Workspace</span>
         </div>
         <div className="ml-auto hidden items-center gap-3 text-sm md:flex">
           <StatusItem icon={<ShieldCheck size={18} />} label="Analyzer" value="Ready" tone="text-emerald-300" />
-          <StatusItem icon={<Database size={18} />} label="Storage" value="Session" tone="text-cyan-200" />
+          <StatusItem icon={<Database size={18} />} label="Storage" value="Railway" tone="text-cyan-200" />
           <StatusItem icon={<Activity size={18} />} label="Uploads" value="Live" tone="text-amber-200" />
           <div className="ml-2 grid size-10 place-items-center rounded-md bg-white/10 text-sm font-bold text-white" title="Admin User">AD</div>
         </div>
       </header>
       <aside className="fixed bottom-0 left-0 top-20 z-10 hidden w-64 flex-col border-r border-line bg-white px-4 py-5 md:flex">
+        <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Overview</p>
         <nav className="space-y-2">
           {navItems.map((item) => {
             const Icon = icons[item as keyof typeof icons];
@@ -58,7 +65,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
                 href={href}
                 className={cn(
                   "focus-ring flex h-12 w-full items-center gap-3 rounded-md border border-transparent px-3 text-left text-sm font-semibold transition",
-                  active ? "border-teal/20 bg-teal/10 text-teal" : "text-slate-600 hover:border-line hover:bg-[#f6f8fb] hover:text-ink"
+                  active ? "border-teal/25 bg-[#e8f7f6] text-teal shadow-[inset_3px_0_0_#087f83]" : "text-slate-600 hover:border-line hover:bg-[#f6f8fb] hover:text-ink"
                 )}
               >
                 <Icon size={20} />
@@ -88,7 +95,7 @@ export function AppShell({ children }: Readonly<{ children: React.ReactNode }>) 
           </div>
         </div>
       </aside>
-      <main className="pt-20 md:ml-64">{children}</main>
+      <main className="bg-[linear-gradient(#e9eef3_1px,transparent_1px),linear-gradient(90deg,#e9eef3_1px,transparent_1px)] bg-[size:28px_28px] bg-fixed pt-20 md:ml-64">{children}</main>
     </div>
   );
 }

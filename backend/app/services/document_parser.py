@@ -9,12 +9,19 @@ from pypdf import PdfReader
 
 ALLOWED_MIME_TYPES = {
     "application/pdf",
+    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "text/plain",
     "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/rtf",
+    "text/rtf",
     "image/png",
     "image/jpeg",
     "image/tiff",
+    "image/webp",
+    "image/bmp",
 }
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
 
@@ -48,7 +55,7 @@ async def validate_upload(file: UploadFile) -> UploadValidation:
 
 
 def is_allowed(filename: str, mime_type: str) -> bool:
-    return mime_type in ALLOWED_MIME_TYPES or filename.lower().endswith((".pdf", ".docx", ".txt", ".md", ".markdown", ".png", ".jpg", ".jpeg", ".tif", ".tiff"))
+    return mime_type in ALLOWED_MIME_TYPES or filename.lower().endswith((".pdf", ".doc", ".docx", ".txt", ".md", ".markdown", ".rtf", ".csv", ".json", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"))
 
 
 def extract_text(filename: str, content: bytes, mime_type: str = "") -> tuple[str, list[str], int | None]:
@@ -56,7 +63,7 @@ def extract_text(filename: str, content: bytes, mime_type: str = "") -> tuple[st
         raise ValueError("Document is empty")
 
     lower_name = filename.lower()
-    if mime_type in {"text/plain", "text/markdown"} or lower_name.endswith((".txt", ".md", ".markdown")):
+    if mime_type in {"text/plain", "text/markdown", "text/csv", "application/json", "application/rtf", "text/rtf"} or lower_name.endswith((".txt", ".md", ".markdown", ".rtf", ".csv", ".json")):
         return content.decode("utf-8", errors="replace").strip(), [], None
 
     if mime_type == "application/pdf" or lower_name.endswith(".pdf"):
@@ -65,7 +72,10 @@ def extract_text(filename: str, content: bytes, mime_type: str = "") -> tuple[st
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or lower_name.endswith(".docx"):
         return extract_docx_text(content)
 
-    if mime_type.startswith("image/") or lower_name.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff")):
+    if mime_type == "application/msword" or lower_name.endswith(".doc"):
+        return extract_legacy_doc_text(content)
+
+    if mime_type.startswith("image/") or lower_name.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp")):
         return extract_image_text(content)
 
     raise ValueError("Unsupported file type")
@@ -97,6 +107,13 @@ def extract_docx_text(content: bytes) -> tuple[str, list[str], int | None]:
     paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
     table_cells = [cell.text.strip() for table in document.tables for row in table.rows for cell in row.cells if cell.text.strip()]
     return "\n".join([*paragraphs, *table_cells]).strip(), [], None
+
+
+def extract_legacy_doc_text(content: bytes) -> tuple[str, list[str], int | None]:
+    text = content.decode("latin1", errors="ignore")
+    clean = "".join(character if character in "\n\r\t" or 32 <= ord(character) <= 126 else " " for character in text)
+    clean = " ".join(clean.split())
+    return clean, ["Used best-effort legacy DOC text extraction. Convert to DOCX for higher fidelity."], None
 
 
 def extract_image_text(content: bytes) -> tuple[str, list[str], int | None]:
