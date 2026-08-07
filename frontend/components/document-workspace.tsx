@@ -105,6 +105,11 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
     if (selectedId === id) setSelectedId(null);
   }
 
+  function removeStalePdfs() {
+    setDocuments((current) => current.filter((document) => !isStalePdf(document)));
+    if (selectedDocument && isStalePdf(selectedDocument)) setSelectedId(null);
+  }
+
   return (
     <div className="min-h-[calc(100vh-80px)] bg-white/70">
       <PageHeader title={title} description={description} documents={documents} queue={queue} />
@@ -127,7 +132,15 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
             onSelect={setSelectedId}
           />
         ) : null}
-        {mode === "analysis" ? <AnalysisView documents={documents} selectedDocument={selectedDocument} onSelect={setSelectedId} onRemove={removeDocument} /> : null}
+        {mode === "analysis" ? (
+          <AnalysisView
+            documents={documents}
+            selectedDocument={selectedDocument}
+            onSelect={setSelectedId}
+            onRemove={removeDocument}
+            onRemoveStalePdfs={removeStalePdfs}
+          />
+        ) : null}
         {mode === "search" ? <SearchView query={query} setQuery={setQuery} results={searchResults} documents={documents} /> : null}
         {mode === "qa" ? (
           <QaView
@@ -285,16 +298,39 @@ function AnalysisView({
   documents,
   selectedDocument,
   onSelect,
-  onRemove
-}: Readonly<{ documents: AnalyzedDocument[]; selectedDocument?: AnalyzedDocument; onSelect: (id: string) => void; onRemove: (id: string) => void }>) {
+  onRemove,
+  onRemoveStalePdfs
+}: Readonly<{
+  documents: AnalyzedDocument[];
+  selectedDocument?: AnalyzedDocument;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
+  onRemoveStalePdfs: () => void;
+}>) {
   if (!selectedDocument) return <EmptyState title="No analysis yet" body="Upload a document first, then return here to review the report." icon={<BarChart3 size={42} />} />;
 
-  const isUnusedPdf = selectedDocument.mimeType === "application/pdf" && selectedDocument.wordCount === 0;
+  const isUnusedPdf = isStalePdf(selectedDocument);
+  const stalePdfCount = documents.filter(isStalePdf).length;
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[320px_1fr_380px]">
-      <DocumentList documents={documents} selectedId={selectedDocument.id} onSelect={onSelect} />
-      <Card className="overflow-hidden">
+    <div className="space-y-5">
+      {stalePdfCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          <p>
+            {stalePdfCount} saved PDF {stalePdfCount === 1 ? "record has" : "records have"} no original file bytes stored, so OCR cannot run from Analysis. Re-upload the PDFs to run all-page OCR, or remove the stale records.
+          </p>
+          <button
+            className="focus-ring inline-flex items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+            onClick={onRemoveStalePdfs}
+          >
+            <Trash2 size={15} />
+            Delete all stale PDFs
+          </button>
+        </div>
+      ) : null}
+      <div className="grid gap-5 xl:grid-cols-[320px_1fr_380px]">
+        <DocumentList documents={documents} selectedId={selectedDocument.id} onSelect={onSelect} />
+        <Card className="overflow-hidden">
         <CardHeader
           title="Analysis report"
           action={
@@ -320,7 +356,7 @@ function AnalysisView({
             </div>
             {isUnusedPdf ? (
               <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                This PDF record has no extracted text. Re-upload it to run all-page browser extraction/OCR, or delete it from this session if it is no longer needed.
+                This saved PDF record has no extracted text and does not include the original file bytes. Re-upload the PDF to run all-page browser extraction/OCR, or delete this stale record.
               </div>
             ) : null}
             <h3 className="mt-6 text-sm font-bold">Key information</h3>
@@ -343,7 +379,7 @@ function AnalysisView({
             ) : (
               <div className="space-y-2 text-amber-700">
                 <p>{selectedDocument.limitations[0] ?? "No extractable text."}</p>
-                {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page to run browser PDF extraction and OCR across every page.</p> : null}
+                {selectedDocument.mimeType === "application/pdf" ? <p>Re-upload this PDF on the Upload page. Saved stale records cannot be OCR'd because the original PDF file is not stored in the browser session.</p> : null}
                 {isUnusedPdf ? (
                   <button
                     className="focus-ring mt-2 inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
@@ -357,11 +393,12 @@ function AnalysisView({
             )}
           </div>
         </div>
-      </Card>
-      <Card className="p-5">
-        <h2 className="text-base font-bold">Writing-style signals</h2>
-        <SignalList document={selectedDocument} />
-      </Card>
+        </Card>
+        <Card className="p-5">
+          <h2 className="text-base font-bold">Writing-style signals</h2>
+          <SignalList document={selectedDocument} />
+        </Card>
+      </div>
     </div>
   );
 }
@@ -532,7 +569,7 @@ function DocumentList({ documents, selectedId, onSelect }: Readonly<{ documents:
       <CardHeader title="Documents" />
       <div className="divide-y divide-line">
         {documents.map((document) => {
-          const isUnusedPdf = document.mimeType === "application/pdf" && document.wordCount === 0;
+          const isUnusedPdf = isStalePdf(document);
           return (
             <button
               key={document.id}
@@ -648,7 +685,7 @@ function normalizeStoredDocument(document: AnalyzedDocument): AnalyzedDocument {
     text: "",
     limitations: [
       document.mimeType === "application/pdf"
-        ? "This saved PDF record has no extracted text. Re-upload it to run browser PDF extraction and OCR across every page."
+        ? "This saved PDF record has no extracted text and does not contain the original file bytes. Re-upload it to run browser PDF extraction and OCR across every page."
         : "This saved record has no extracted text. Re-upload it to run extraction again."
     ]
   });
@@ -657,6 +694,10 @@ function normalizeStoredDocument(document: AnalyzedDocument): AnalyzedDocument {
     ...refreshed,
     uploadedAt: document.uploadedAt
   };
+}
+
+function isStalePdf(document: AnalyzedDocument) {
+  return document.mimeType === "application/pdf" && document.wordCount === 0;
 }
 
 async function completeWithBrowserOcr(file: File, document: AnalyzedDocument, onProgress: (status: UploadStatus, progress: number) => void) {
