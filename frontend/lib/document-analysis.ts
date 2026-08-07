@@ -181,26 +181,50 @@ export function answerQuestion(document: AnalyzedDocument | undefined, question:
   if (!document || question.trim().length === 0) {
     return null;
   }
+
+  if (document.wordCount === 0 || document.chunks.length === 0) {
+    return {
+      answer: "This document does not have extracted text yet. Re-upload it from the Upload page so extraction/OCR can create searchable text before Q&A runs.",
+      confidence: "Low",
+      citation: undefined
+    };
+  }
+
+  if (isSummaryQuestion(question)) {
+    return {
+      answer: summarizeDocument(document),
+      confidence: document.wordCount >= 80 ? "Moderate" : "Low",
+      citation: document.chunks[0]
+    };
+  }
+
   const terms = tokenize(question);
+  if (terms.length === 0) {
+    return {
+      answer: summarizeDocument(document),
+      confidence: document.wordCount >= 80 ? "Moderate" : "Low",
+      citation: document.chunks[0]
+    };
+  }
+
   const best = document.chunks
     .map((chunk) => ({ ...chunk, score: scoreText(chunk.text, terms) }))
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
 
   if (!best || (best.score ?? 0) === 0) {
+    const fallback = mostInformativeChunk(document);
     return {
-      answer: "I could not find a strong matching passage in the uploaded document.",
+      answer: `I could not find a strong exact match, but the most relevant available context says: ${clipText(fallback.text, 420)}`,
       confidence: "Low",
-      citation: document.chunks[0]
+      citation: fallback
     };
   }
 
-  const sentence = best.text
-    .split(/(?<=[.!?])\s+/)
-    .find((part) => scoreText(part, terms) > 0) ?? best.text.slice(0, 260);
+  const sentence = buildAnswerFromChunk(best.text, terms);
 
   return {
     answer: sentence,
-    confidence: (best.score ?? 0) > 0.45 ? "Moderate" : "Low",
+    confidence: (best.score ?? 0) >= 0.35 ? "Moderate" : "Low",
     citation: best
   };
 }
@@ -302,13 +326,21 @@ function noExtractedTextSignals(): AnalysisSignal[] {
 }
 
 function tokenize(value: string) {
-  return Array.from(new Set((value.toLowerCase().match(WORD_RE) ?? []).filter((word) => word.length > 2)));
+  return Array.from(
+    new Set(
+      (value.toLowerCase().match(WORD_RE) ?? [])
+        .map(normalizeToken)
+        .filter((word) => word.length > 2 && !STOP_WORDS.has(word))
+    )
+  );
 }
 
 function scoreText(text: string, terms: string[]) {
   const lower = text.toLowerCase();
-  const hits = terms.filter((term) => lower.includes(term)).length;
-  return terms.length === 0 ? 0 : hits / terms.length;
+  const words = new Set((lower.match(WORD_RE) ?? []).map(normalizeToken));
+  const exactHits = terms.filter((term) => words.has(term)).length;
+  const phraseHits = terms.filter((term) => lower.includes(term)).length;
+  return terms.length === 0 ? 0 : (exactHits * 1.2 + phraseHits * 0.4) / (terms.length * 1.6);
 }
 
 function repeatedWordRate(words: string[]) {
@@ -357,4 +389,85 @@ function confidenceFromUncertainty(uncertainty: number, wordCount: number): "Low
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+const STOP_WORDS = new Set([
+  "about",
+  "after",
+  "also",
+  "and",
+  "are",
+  "can",
+  "could",
+  "does",
+  "for",
+  "from",
+  "give",
+  "has",
+  "have",
+  "how",
+  "into",
+  "its",
+  "please",
+  "show",
+  "that",
+  "the",
+  "this",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "with",
+  "would",
+  "you"
+]);
+
+function normalizeToken(token: string) {
+  return token.replace(/'s$/, "").replace(/(?:ing|ed|es|s)$/i, "");
+}
+
+function isSummaryQuestion(question: string) {
+  return /\b(summarize|summary|overview|brief|main points?|key points?|gist)\b/i.test(question);
+}
+
+function summarizeDocument(document: AnalyzedDocument) {
+  const title = document.keyInformation.find((item) => item.label === "Title")?.value;
+  const firstChunk = mostInformativeChunk(document);
+  const sentences = splitSentences(firstChunk.text).slice(0, 3);
+  const summaryText = sentences.length > 0 ? sentences.join(" ") : clipText(firstChunk.text, 520);
+  const prefix = title && title !== document.filename ? `${title}: ` : "";
+  return `${prefix}${summaryText}`;
+}
+
+function mostInformativeChunk(document: AnalyzedDocument) {
+  return [...document.chunks].sort((a, b) => informativeScore(b.text) - informativeScore(a.text))[0] ?? document.chunks[0];
+}
+
+function informativeScore(text: string) {
+  const words = text.match(WORD_RE) ?? [];
+  const emails = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.length ?? 0;
+  const numbers = text.match(/\b\d{2,}\b/g)?.length ?? 0;
+  return words.length + emails * 20 + numbers * 4;
+}
+
+function buildAnswerFromChunk(text: string, terms: string[]) {
+  const matching = splitSentences(text).filter((sentence) => scoreText(sentence, terms) > 0);
+  const answer = matching.length > 0 ? matching.slice(0, 3).join(" ") : text;
+  return clipText(answer, 620);
+}
+
+function splitSentences(text: string) {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+|(?:\s-\s)|(?:\s\|\s)/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 20);
+}
+
+function clipText(text: string, maxLength: number) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trim()}...`;
 }

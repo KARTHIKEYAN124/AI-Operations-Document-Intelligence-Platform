@@ -110,6 +110,17 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
     if (selectedDocument && isStalePdf(selectedDocument)) setSelectedId(null);
   }
 
+  function selectQuestionDocument(id: string) {
+    setSelectedId(id);
+    setAnswer(null);
+  }
+
+  function askSelectedDocument() {
+    const trimmed = question.trim();
+    if (!selectedDocument || !trimmed) return;
+    setAnswer(answerQuestion(selectedDocument, trimmed));
+  }
+
   return (
     <div className="min-h-[calc(100vh-80px)] bg-white/70">
       <PageHeader title={title} description={description} documents={documents} queue={queue} />
@@ -146,11 +157,11 @@ export function WorkspacePage({ mode }: Readonly<{ mode: WorkspaceMode }>) {
           <QaView
             documents={documents}
             selectedDocument={selectedDocument}
-            onSelect={setSelectedId}
+            onSelect={selectQuestionDocument}
             question={question}
             setQuestion={setQuestion}
             answer={answer}
-            onAsk={() => setAnswer(answerQuestion(selectedDocument, question))}
+            onAsk={askSelectedDocument}
           />
         ) : null}
         {mode === "history" ? <HistoryView documents={documents} onSelect={setSelectedId} onRemove={removeDocument} /> : null}
@@ -461,7 +472,7 @@ function QaView({
         <p className="mt-1 text-sm text-muted">{selectedDocument ? selectedDocument.filename : "Select or upload a document first."}</p>
         <div className="mt-5 flex gap-3">
           <input className="h-12 min-w-0 flex-1 rounded-md border border-line px-4 outline-none focus:border-teal" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => event.key === "Enter" && onAsk()} placeholder="Ask for a summary, dates, requirements, risks, or key facts..." />
-          <button className="rounded-md bg-teal px-6 font-semibold text-white disabled:opacity-50" onClick={onAsk} disabled={!selectedDocument}>Ask</button>
+          <button className="rounded-md bg-teal px-6 font-semibold text-white disabled:opacity-50" onClick={onAsk} disabled={!selectedDocument || !question.trim()}>Ask</button>
         </div>
         <div className="mt-6 rounded-lg border border-line bg-slate-50 p-5">
           {answer ? (
